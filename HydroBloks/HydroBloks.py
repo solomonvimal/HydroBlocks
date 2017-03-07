@@ -142,7 +142,8 @@ def Initialize_Model(ncells,dt,nsoil,info):
  #nsoil = 7
  #z = np.linspace(0.0,2.0,nsoil+1)
  #tmp = z[1:] - z[0:-1]
- tmp = np.array([0.1,0.3,0.6,1.0,2.0,2.0,2.0,2.0]) #Let's bring this out to the metadata
+ #tmp = np.array([0.1,0.3,0.6,1.0,2.0,2.0,2.0,2.0]) #Let's bring this out to the metadata
+ tmp = np.array([0.1,0.1,0.1,0.2,0.25,0.25,0.25,0.25,0.5,0.5,0.5,0.5,0.5,1.0,1.0,2.0,2.0]) # Noemi
  #tmp = 0.1*np.ones(nsoil)
  model.sldpth[:] = tmp
  model.zsoil[:] = -np.cumsum(model.sldpth[:],axis=1)
@@ -311,10 +312,9 @@ def Initialize_HWU(NOAH,ncells,info):
 
 def Update_Model(NOAH,TOPMODEL,HWU,HB,ncores):
 
- #Abstract Water from Human Use 
- if HWU.hwu_flag == True:
-  if HWU.itime > 0: HWU.irrigation(NOAH,HB)
-  HWU.itime = HWU.itime +1
+ #Apply Irrigation
+ if HWU.hwu_flag == True: 
+  HWU.Human_Water_Irrigation(NOAH,TOPMODEL,HB)
 
  #Set the partial pressure of CO2 and O2
  NOAH.co2air[:] = 355.E-6*NOAH.psfc[:]# ! Partial pressure of CO2 (Pa) ! From NOAH-MP-WRF
@@ -325,7 +325,7 @@ def Update_Model(NOAH,TOPMODEL,HWU,HB,ncores):
 
  #Reinitialize dzwt
  NOAH.dzwt[:] = 0.0
-
+ print 'before', TOPMODEL.qsurf, NOAH.runsf[:]/1000.0
  if TOPMODEL.subsurface_flow_flag == True:
 
   #Calculate the updated soil moisture deficit
@@ -350,6 +350,13 @@ def Update_Model(NOAH,TOPMODEL,HWU,HB,ncores):
 
   #Update the soil moisture values
   NOAH.dzwt[:] = np.copy(dsi+TOPMODEL.dt*TOPMODEL.ex-TOPMODEL.dt*TOPMODEL.r)
+
+ print 'after', TOPMODEL.qsurf, NOAH.runsf[:]/1000.0
+ if HWU.hwu_flag == True:
+  # Calculate human water use demand
+  HWU.Human_Water_Demand(NOAH,TOPMODEL,HB) 
+  # Check if demand meets supply and abstract water
+  HWU.Human_Water_Abstraction(NOAH,TOPMODEL,HB)
 
  return (NOAH,TOPMODEL,HWU,HB)
 
@@ -427,7 +434,7 @@ def Run_Model(info):
 
   #Save the original precip
   precip = np.copy(NOAH.prcp)
-  
+   
   for itt in xrange(ntt):
 
    #Calculate initial NOAH water balance
@@ -435,10 +442,10 @@ def Run_Model(info):
 
    #Update model
    (NOAH,TOPMODEL,HWU,HB) = Update_Model(NOAH,TOPMODEL,HWU,HB,ncores)
-
+   print NOAH.runsf[:]
    #Return precip to original value
-   NOAH.prcp[:] = precip[:] 
-
+   NOAH.prcp[:] = precip[:]
+   
    #Calculate final water balance
    HB.Finalize_Water_Balance(NOAH,TOPMODEL)
 
@@ -599,7 +606,7 @@ def Create_Netcdf_File(info):
  for value in xrange(nhsu):hsus.append(value)
  hsu[:] = np.array(hsus)
  hsu.description = 'hsu ids'
-
+ 
  #Create the mapping
  if info['create_mask_flag'] == True:
   grp = fp_out.createGroup('latlon_mapping')
