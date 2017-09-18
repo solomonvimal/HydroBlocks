@@ -3,12 +3,19 @@ HydroBlocks
 
 HydroBlocks relies on a number python libraries. To make this straightforward use conda (http://conda.pydata.org/miniconda.html) to install all the packages. Here are the steps to install the model.
 
+
 1. conda install gdal
 2. conda install scikit-learn
 3. conda install netCDF4
-4. git clone https://github.com/chaneyn/HydroBlocks.git
-5. cd HydroBlocks
-6. python setup.py
+4. conda install matplotlib
+5. git clone https://github.com/chaneyn/HydroBlocks.git
+6. cd HydroBlocks
+7. python setup.py
+
+If you want to enable the water management module
+8.  conda install -c snorfalorpagus lpsolve=5.5.2.3
+9.  conda install -c conda-forge glpk
+10. conda install -c pywr pywr=0.2
 
 Note: If you have the intel mkl library on your machine, we recommend that you set the mkl_flag variable in setup.py to True.
 

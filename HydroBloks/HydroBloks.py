@@ -21,6 +21,7 @@ def Finalize_Model(NOAH,TOPMODEL,info):
  #Delete the objects
  del NOAH
  del TOPMODEL
+ #del HWU
 
  return
 
@@ -114,18 +115,18 @@ def Initialize_Model(ncells,dt,nsoil,info):
  #model.soilparm_file[0:len(info['SOILPARM'])] = info['SOILPARM']
  model.mptable_file[0:len(info['MPTABLE'])] = info['MPTABLE']#'pyNoahMP/data/MPTABLE.TBL'
  #Define the options
- model.idveg = 3#3#4 # dynamic vegetation (1 -> off ; 2 -> on)
- model.iopt_crs = 2#2 # canopy stomatal resistance (1-> Ball-Berry; 2->Jarvis)
- model.iopt_btr = 1#2 # soil moisture factor for stomatal resistance (1-> Noah; 2-> CLM; 3-> SSiB)
- model.iopt_run = 5#5#2#5##2#2 # runoff and groundwater (1->SIMGM; 2->SIMTOP; 3->Schaake96; 4->BATS)
- model.iopt_sfc = 2#2 # surface layer drag coeff (CH & CM) (1->M-O; 2->Chen97)
- model.iopt_frz = 2#1 # supercooled liquid water (1-> NY06; 2->Koren99)
- model.iopt_inf = 2#1#1#2 # frozen soil permeability (1-> NY06; 2->Koren99)
+ model.idveg    = 1 #3 # dynamic vegetation (1 -> off ; 2 -> on; 3 -> off (use table LAI; calculate FVEG); 4 -> off (use table LAI; use maximum vegetation fraction)) 
+ model.iopt_crs = 1 #2 # canopy stomatal resistance (1-> Ball-Berry; 2->Jarvis)
+ model.iopt_btr = 1 # soil moisture factor for stomatal resistance (1-> Noah; 2-> CLM; 3-> SSiB)
+ model.iopt_run = 5 # runoff and groundwater (1->SIMGM; 2->SIMTOP; 3->Schaake96; 4->BATS; 5-> Miguez-Macho&Fan)
+ model.iopt_sfc = 1 #2 # surface layer drag coeff (CH & CM) (1->M-O; 2->Chen97)
+ model.iopt_frz = 1 #2 # supercooled liquid water (1-> NY06; 2->Koren99)
+ model.iopt_inf = 1 #2 # frozen soil permeability (1-> NY06; 2-> non-linear effects - old)
  model.iopt_rad = 2 # radiation transfer (1->gap=F(3D,cosz); 2->gap=0; 3->gap=1-Fveg)
  model.iopt_alb = 1 # snow surface albedo (1->BATS; 2->CLASS)
  model.iopt_snf = 3 # rainfall & snowfall (1-Jordan91; 2->BATS; 3->Noah)]
- model.iopt_tbot = 1#1#1 # lower boundary of soil temperature (1->zero-flux; 2->Noah) 
- model.iopt_stc = 1#1#2 # snow/soil temperature time scheme (only layer 1) 1 -> semi-implicit; 2 -> full implicit (original Noah)
+ model.iopt_tbot = 1 # lower boundary of soil temperature (1->zero-flux; 2->Noah) 
+ model.iopt_stc  = 1  # snow/soil temperature time scheme (only layer 1) 1 -> semi-implicit; 2 -> full implicit (original Noah)
  #Allocate memory
  #model.initialize()
  model.initialize_general()
@@ -195,8 +196,11 @@ def Initialize_Model(ncells,dt,nsoil,info):
  model.albold[:] = 0.5
  #Define the data
  model.vegtyp[:] = info['input_fp'].groups['parameters'].variables['land_cover'][:]
+ 
  model.soiltyp[:] = np.arange(1,ncells+1)
  #info['input_fp'].groups['parameters'].variables['soil_texture_class'][:]
+ model.clay_pct = info['input_fp'].groups['parameters'].variables['clay'][:] # Noemi
+ 
  model.smcmax[:] = info['input_fp'].groups['parameters'].variables['MAXSMC'][:]
  model.smcref[:] = info['input_fp'].groups['parameters'].variables['REFSMC'][:]
  model.smcdry[:] = info['input_fp'].groups['parameters'].variables['DRYSMC'][:]
@@ -265,7 +269,7 @@ def Initialize_DTopmodel(ncells,dt,info):
  dem = []
  #Set cluster information
  model.pct[:] = info['input_fp'].groups['parameters'].variables['area_pct'][:]/100
- model.area[:] = info['input_fp'].groups['parameters'].variables['area'][:]
+ model.area[:] = info['input_fp'].groups['parameters'].variables['area'][:]   # m2
  model.T0[:] = info['input_fp'].groups['parameters'].variables['SATDK'][:]*model.m
  model.sti[:] = info['input_fp'].groups['parameters'].variables['ti'][:]
  model.beta[:] = info['input_fp'].groups['parameters'].variables['slope'][:]
@@ -301,20 +305,26 @@ def Initialize_DTopmodel(ncells,dt,info):
  return model
 
 
-def Initialize_HWU(NOAH,ncells,info):
+def Initialize_HWU(NOAH,TOPMODEL,ncells,info):
 
  from Human_Water_Use import Human_Water_Use
- model = Human_Water_Use(NOAH,ncells)
+ model = Human_Water_Use(NOAH,TOPMODEL,info,ncells)
  model.hwu_flag = info['hwu_flag']
- model.irrig = np.zeros(ncells,dtype=np.float32)
 
+ dt = info['dt']
+ dtt = info['dtt']
+ model.dta = dt # allocation time step
+ model.ntt = int(dt/dtt) #sub-timesteps
+
+ if model.hwu_flag == True:
+  model.Initialize_Allocation(NOAH,TOPMODEL,info)
+ 
  return model
 
-def Update_Model(NOAH,TOPMODEL,HWU,HB,ncores):
+def Update_Model(NOAH,TOPMODEL,HWU,HB,date,ncores):
 
- #Apply Irrigation
- if HWU.hwu_flag == True: 
-  HWU.Human_Water_Irrigation(NOAH,TOPMODEL,HB)
+ # Apply Irrigation
+ #HWU.Human_Water_Irrigation(NOAH,TOPMODEL,HB)
 
  #Set the partial pressure of CO2 and O2
  NOAH.co2air[:] = 355.E-6*NOAH.psfc[:]# ! Partial pressure of CO2 (Pa) ! From NOAH-MP-WRF
@@ -325,7 +335,7 @@ def Update_Model(NOAH,TOPMODEL,HWU,HB,ncores):
 
  #Reinitialize dzwt
  NOAH.dzwt[:] = 0.0
- print 'before', TOPMODEL.qsurf, NOAH.runsf[:]/1000.0
+
  if TOPMODEL.subsurface_flow_flag == True:
 
   #Calculate the updated soil moisture deficit
@@ -351,12 +361,8 @@ def Update_Model(NOAH,TOPMODEL,HWU,HB,ncores):
   #Update the soil moisture values
   NOAH.dzwt[:] = np.copy(dsi+TOPMODEL.dt*TOPMODEL.ex-TOPMODEL.dt*TOPMODEL.r)
 
- print 'after', TOPMODEL.qsurf, NOAH.runsf[:]/1000.0
- if HWU.hwu_flag == True:
-  # Calculate human water use demand
-  HWU.Human_Water_Demand(NOAH,TOPMODEL,HB) 
-  # Check if demand meets supply and abstract water
-  HWU.Human_Water_Abstraction(NOAH,TOPMODEL,HB)
+ # Abstract Surface Water and Groundwater
+ HWU.Water_Supply_Abstraction(NOAH,TOPMODEL,HB)
 
  return (NOAH,TOPMODEL,HWU,HB)
 
@@ -403,8 +409,8 @@ def Run_Model(info):
  TOPMODEL = Initialize_DTopmodel(ncells,dt,info) 
 
  #Initialize human water use module
- print "Initializing the water management module"
- HWU = Initialize_HWU(NOAH,ncells,info) 
+ print "Initializing Water Management"
+ HWU = Initialize_HWU(NOAH,TOPMODEL,ncells,info) 
 
  #Initialize the coupler
  HB = HydroBloks(ncells)
@@ -425,7 +431,11 @@ def Run_Model(info):
    print date,time.time() - tic,'et:%f'%HB.et,'prcp:%f'%HB.prcp,'q:%f'%HB.q,'WB ERR:%f' % HB.errwat,'ENG ERR:%f' % HB.erreng
  
   #Update input data
-  Update_Input(NOAH,TOPMODEL,date,info,i)
+  Update_Input(NOAH,TOPMODEL,HWU,date,info,i)
+
+  # Calculate water demands and supplies, and allocate volumes
+  HWU.date = date
+  HWU.Calc_Human_Water_Demand_Supply(NOAH,TOPMODEL,HB)
 
   #Run sub-timesteps
   ntt = int(dt/dtt)
@@ -441,8 +451,8 @@ def Run_Model(info):
    HB.Initialize_Water_Balance(NOAH,TOPMODEL)
 
    #Update model
-   (NOAH,TOPMODEL,HWU,HB) = Update_Model(NOAH,TOPMODEL,HWU,HB,ncores)
-   print NOAH.runsf[:]
+   (NOAH,TOPMODEL,HWU,HB) = Update_Model(NOAH,TOPMODEL,HWU,HB,date,ncores)
+   
    #Return precip to original value
    NOAH.prcp[:] = precip[:]
    
@@ -464,7 +474,7 @@ def Run_Model(info):
   info['date'] = date
 
   #Update output
-  Update_Output(info,i,NOAH,TOPMODEL,HB)
+  Update_Output(info,i,NOAH,TOPMODEL,HWU,HB)
 
   #Update time step
   date = date + dt_timedelta
@@ -479,7 +489,7 @@ def Run_Model(info):
 
  return
 
-def Update_Input(NOAH,TOPMODEL,date,info,i):
+def Update_Input(NOAH,TOPMODEL,HWU,date,info,i):
 
   NOAH.itime = i
   dt = NOAH.dt
@@ -501,7 +511,20 @@ def Update_Input(NOAH,TOPMODEL,date,info,i):
   NOAH.qsfc1d[:] = meteorology.variables['spfh'][i,:] #Kg/Kg
   NOAH.prcp[:] = meteorology.variables['precip'][i,:] #mm/s
 
-  return (NOAH,TOPMODEL)
+  # Update water demands
+  if HWU.hwu_flag == True:
+   water_use = info['input_fp'].groups['water_use']
+   if HWU.hwu_indust_flag == True: 
+    HWU.demand_indust[:]  = water_use.variables['industrial'][i,:] #m/s
+    HWU.deficit_indust[:] = np.copy(HWU.demand_indust[:])
+   if HWU.hwu_domest_flag == True: 
+    HWU.demand_domest[:]  = water_use.variables['domestic'][i,:] #m/s
+    HWU.deficit_domest[:] = np.copy(HWU.demand_domest[:])
+   if HWU.hwu_lstock_flag == True: 
+    HWU.demand_lstock[:]  = water_use.variables['livestock'][i,:] #m/s
+    HWU.deficit_lstock[:] = np.copy(HWU.demand_lstock[:])
+
+  return (NOAH,TOPMODEL,HWU)
 
 def Create_Netcdf_File(info):
 
@@ -514,8 +537,9 @@ def Create_Netcdf_File(info):
              'g':{'description':'Ground heat flux','units':'W/m2'},
              'sh':{'description':'Sensible heat flux','units':'W/m2'},
              'lh':{'description':'Latent heat flux','units':'W/m2'},
-             #'lwnet':{'description':'Net longwave radiation','units':'W/m2'},
-             #'swnet':{'description':'Absorbed shortwave radiation','units':'W/m2'},
+             'lwnet':{'description':'Net longwave radiation','units':'W/m2'},
+             'swnet':{'description':'Absorbed shortwave radiation','units':'W/m2'},
+             'trad':{'description':'Land Surface Skin Temperature','units':'K'},
              #'et':{'description':'Evapotranspiration','units':'mm/s'},
              'qbase':{'description':'Excess runoff','units':'mm/s'},
              'qsurface':{'description':'Surface runoff','units':'mm/s'},
@@ -530,9 +554,17 @@ def Create_Netcdf_File(info):
              #'swe':{'description':'Snow water equivalent','units':'mm'},
              'qout_subsurface':{'description':'Subsurface flux','units':'m2/s'},
              'qout_surface':{'description':'Surface flux','units':'m2/s'},
-             'wtd':{'description':'WTD','units':'m'},
+             'wtd':{'description':'Water table depth','units':'m'},
              'errwat':{'description':'errwat','units':'mm'},
-             'totsmc':{'description':'totsmc','units':'??'},
+             'totsmc':{'description':'Total soil column soil moisturec','units':'m3/m3'},
+             'demand_agric':{'description':'Irrigation demand','units':'mm'},
+             'deficit_agric':{'description':'Irrigation deficit','units':'mm'},
+             'demand_indust':{'description':'Industrial demand','units':'mm'},
+             'deficit_indust':{'description':'Industrial deficit','units':'mm'},
+             'demand_domest':{'description':'Domestic demand','units':'mm'},
+             'deficit_domest':{'description':'Domestic deficit','units':'mm'},
+             'demand_lstock':{'description':'Livestock demand','units':'mm'},
+             'deficit_lstock':{'description':'Livestock deficit','units':'mm'},
              }
 
  #Create the dimensions
@@ -606,23 +638,24 @@ def Create_Netcdf_File(info):
  for value in xrange(nhsu):hsus.append(value)
  hsu[:] = np.array(hsus)
  hsu.description = 'hsu ids'
- 
+
+
  #Create the mapping
  if info['create_mask_flag'] == True:
   grp = fp_out.createGroup('latlon_mapping')
-  grp.createDimension('nlon',len(fp_in.groups['latlon_mapping'].dimensions['nlon']))
-  grp.createDimension('nlat',len(fp_in.groups['latlon_mapping'].dimensions['nlat']))
+  grp.createDimension('nlon',len(fp_in.groups['conus_albers_mapping'].dimensions['nx']))
+  grp.createDimension('nlat',len(fp_in.groups['conus_albers_mapping'].dimensions['ny']))
   hmll = grp.createVariable('hmll','f4',('nlat','nlon'))
-  hmll.gt = fp_in.groups['latlon_mapping'].variables['hmll'].gt
-  hmll.projection = fp_in.groups['latlon_mapping'].variables['hmll'].projection
+  hmll.gt = fp_in.groups['conus_albers_mapping'].variables['hmca'].gt
+  hmll.projection = fp_in.groups['conus_albers_mapping'].variables['hmca'].projection
   hmll.description = 'HSU mapping (regular lat/lon)'
-  hmll.nodata = fp_in.groups['latlon_mapping'].variables['hmll'].nodata
+  hmll.nodata = fp_in.groups['conus_albers_mapping'].variables['hmca'].nodata
   #Save the lat/lon mapping
-  hmll[:] = fp_in.groups['latlon_mapping'].variables['hmll'][:]
+  hmll[:] = fp_in.groups['conus_albers_mapping'].variables['hmca'][:]
 
  return
 
-def Update_Output(info,itime,NOAH,TOPMODEL,HB):
+def Update_Output(info,itime,NOAH,TOPMODEL,HWU,HB):
 
  #Create the netcdf file
  if itime == 0: Create_Netcdf_File(info)
@@ -647,17 +680,35 @@ def Update_Output(info,itime,NOAH,TOPMODEL,HB):
  grp.variables['qbase'][itime,:] = NOAH.dt*np.copy(NOAH.runsb) #mm
  grp.variables['qsurface'][itime,:] = NOAH.dt*np.copy(NOAH.runsf) #mm
  grp.variables['prcp'][itime,:] = NOAH.dt*np.copy(NOAH.prcp) #mm
-
+ grp.variables['trad'][itime,:] = np.copy(NOAH.trad) #K
+ 
  #TOPMODEL
  grp.variables['swd'][itime,:] = np.copy(10**3*TOPMODEL.si) #mm
  grp.variables['qout_subsurface'][itime,:] = np.copy(TOPMODEL.qout) #m2/s
  grp.variables['qout_surface'][itime,:] = np.copy(TOPMODEL.qout_surface) #m2/s
  grp.variables['sstorage'][itime,:] = np.copy(TOPMODEL.storage_surface)
-
- #New
+ 
+ #Human Water Management
  grp.variables['wtd'][itime,:] = np.copy(NOAH.zwt)
- grp.variables['errwat'][itime,:] = np.copy(HB.errwat)
- grp.variables['totsmc'][itime,:] = smw = np.sum(1000*NOAH.sldpth*NOAH.smc,axis=1)
+ grp.variables['totsmc'][itime,:] = smw = np.sum(NOAH.sldpth*NOAH.smc,axis=1)/np.sum(NOAH.sldpth[0])
+ 
+ if HWU.hwu_agric_flag:
+  grp.variables['demand_agric'][itime,:] = np.copy(HWU.demand_agric)*NOAH.dt
+  grp.variables['deficit_agric'][itime,:] = np.copy(HWU.deficit_agric)*NOAH.dt
+ if HWU.hwu_flag:
+   if HWU.hwu_indust_flag: 
+     grp.variables['demand_indust'][itime,:] = np.copy(HWU.demand_indust)*NOAH.dt
+     grp.variables['deficit_indust'][itime,:] = np.copy(HWU.deficit_indust)*NOAH.dt
+   if HWU.hwu_domest_flag:
+     grp.variables['demand_domest'][itime,:] = np.copy(HWU.demand_domest)*NOAH.dt
+     grp.variables['deficit_domest'][itime,:] = np.copy(HWU.deficit_domest)*NOAH.dt
+   if HWU.hwu_lstock_flag:
+     grp.variables['demand_lstock'][itime,:] = np.copy(HWU.demand_lstock)*NOAH.dt
+     grp.variables['deficit_lstock'][itime,:] = np.copy(HWU.deficit_lstock)*NOAH.dt
+
+
+ # HydroBlocks Variables
+ grp.variables['errwat'][itime,:] = np.copy(HB.errwat) 
 
  #Update the variables (outlet)
  #grp = info['output_fp'].groups['outlet']

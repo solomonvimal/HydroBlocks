@@ -42,8 +42,15 @@ hydrobloks_info = {
         'covariates':metadata['covariates'],
         'clustering_type':metadata['clustering_type'],
         'hillslope_info':metadata['hillslope_info'],
-        'basin_info':metadata['basin_info'],
-	}
+        'basin_info':metadata['basin_info'],	
+    "hwu_flag":metadata['hwu_flag'],
+    "hwu_sf_flag":metadata['hwu_sf_flag'],
+    "hwu_gw_flag":metadata['hwu_gw_flag'],
+    "hwu_agric_flag":metadata['hwu_agric_flag'],
+    "hwu_domest_flag":metadata['hwu_domest_flag'],
+    "hwu_indust_flag":metadata['hwu_indust_flag'],
+    "hwu_lstock_flag":metadata['hwu_lstock_flag'],
+    }
 
 #Cluster the data
 Preprocessing.Prepare_Model_Input_Data(hydrobloks_info)

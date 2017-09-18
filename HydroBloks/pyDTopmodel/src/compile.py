@@ -21,6 +21,7 @@ os.system(cmd)
 #Create a version with the include commented out
 cmd = 'f2py dynamic_topmodel_tools_wrapper.f90 -h dynamic_topmodel_tools.pyf -m dynamic_topmodel_tools --overwrite-signature'
 os.system(cmd)
+
 #cmd = 'f2py -c dynamic_topmodel_tools.pyf wrapper.f90 *.o -lgomp -liomp5 -lmkl_rt -lpthread -lm --fcompiler=gnu95 --f90flags="-w -O3 -funroll-loops -m64 -Wl,--no-as-needed -openmp -fopenmp -g -fbacktrace"'
 cmd = 'f2py -c dynamic_topmodel_tools.pyf dynamic_topmodel_tools_wrapper.f90 *.o -lgomp -lmkl_rt -L%s --fcompiler=gnu95' % (mkl_library)
 os.system(cmd)

@@ -34,7 +34,13 @@ hydrobloks_info = {
         'workspace':metadata['workspace'],
 	'surface_flow_flag':metadata['surface_flow_flag'],
 	'subsurface_flow_flag':metadata['subsurface_flow_flag'],
-        'hwu_flag':metadata['hwu_flag'],
+    "hwu_flag":metadata['hwu_flag'],
+      "hwu_sf_flag":metadata['hwu_sf_flag'],
+      "hwu_gw_flag":metadata['hwu_gw_flag'],
+      "hwu_agric_flag":metadata['hwu_agric_flag'],
+      "hwu_domest_flag":metadata['hwu_domest_flag'],
+      "hwu_indust_flag":metadata['hwu_indust_flag'],
+      "hwu_lstock_flag":metadata['hwu_lstock_flag'],
 	'dt':metadata['dt'],#seconds
 	'dtt':metadata['dtt'],#seconds
 	'dx':metadata['dx'],#meters

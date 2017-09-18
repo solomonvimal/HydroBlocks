@@ -16,6 +16,10 @@ import glob
 from geospatialtools import gdal_tools
 from geospatialtools import terrain_tools
 import matplotlib.pyplot as plt
+import random
+from skimage.segmentation import find_boundaries, clear_border
+from osgeo import ogr, osr, gdal
+
 
 def Prepare_Model_Input_Data(hydrobloks_info):
 
@@ -83,7 +87,14 @@ def Prepare_Model_Input_Data(hydrobloks_info):
   'bare30':'%s/bare30_ea.tif' % workspace,
   'water30':'%s/water30_ea.tif' % workspace,
   'tree30':'%s/tree30_ea.tif' % workspace,
+  'irrig_land':'%s/irrig_land_ea.tif' % workspace
   }
+ if hydrobloks_info['hwu_flag']:
+  if hydrobloks_info['hwu_agric_flag']:
+   wbd['files']['irrig_land'] = '%s/irrig_land_ea.tif' % workspace
+   wbd['files']['start_growing_season'] = '%s/start_growing_season_ea.tif' % workspace
+   wbd['files']['end_growing_season']   = '%s/end_growing_season_ea.tif' % workspace
+
  wbd['files_meteorology'] = {
   'lwdown':'%s/lwdown.nc' % workspace,
   'swdown':'%s/swdown.nc' % workspace,
@@ -94,6 +105,16 @@ def Prepare_Model_Input_Data(hydrobloks_info):
   'spfh':'%s/spfh.nc' % workspace,
   }
 
+ if hydrobloks_info['hwu_flag'] == True:
+  wbd['files_water_use'] = {}
+  if hydrobloks_info['hwu_domest_flag']:
+   wbd['files_water_use']['domestic']   = '%s/domestic.nc' % workspace
+  if hydrobloks_info['hwu_indust_flag']:
+   wbd['files_water_use']['industrial'] = '%s/industrial.nc' % workspace
+  if hydrobloks_info['hwu_lstock_flag']:
+   wbd['files_water_use']['livestock']  = '%s/livestock.nc' % workspace
+  
+
  #Create the clusters and their connections
  output = Create_Clusters_And_Connections(workspace,wbd,output,input_dir,nclusters,ncores,info,hydrobloks_info)
 
@@ -103,6 +124,14 @@ def Prepare_Model_Input_Data(hydrobloks_info):
   Prepare_Meteorology_Semidistributed(workspace,wbd,output,input_dir,info,hydrobloks_info)
  elif hydrobloks_info['model_type'] == 'full':
   Prepare_Meteorology_Fulldistributed(workspace,wbd,output,input_dir,info,hydrobloks_info)
+
+ #Extract the water use demands
+ print "Preparing the water use"
+ if hydrobloks_info['model_type'] == 'semi':
+  if hydrobloks_info['hwu_flag'] == True:
+   Prepare_Water_Use_Semidistributed(workspace,wbd,output,input_dir,info,hydrobloks_info) 
+ elif hydrobloks_info['model_type'] == 'full':
+   exit('Error: Human Water Management not implemented in the fully distributed mode yet.')
 
  #Write out the files to the netcdf file
  fp = hydrobloks_info['input_fp']
@@ -217,13 +246,19 @@ def Prepare_Model_Input_Data(hydrobloks_info):
  grp = fp.createGroup('parameters')
  vars = ['slope','area_pct','land_cover','channel',
         'dem','soil_texture_class','ti','carea','area',
-        'BB','F11','SATPSI','SATDW','QTZ',
+        'BB','F11','SATPSI','SATDW','QTZ','clay',
         'WLTSMC','MAXSMC','DRYSMC','REFSMC','SATDK',
+        'centroid_lats', 'centroid_lons',
+        'irrig_land', 'start_growing_season', 'end_growing_season',
         'mannings','m','psoil','pksat','sdmax']
 
  for var in vars:
   grp.createVariable(var,'f4',('hsu',))
   grp.variables[var][:] = data['hsu'][var]
+
+ grp.createVariable('hru_min_dist','f4',('hsu','hsu'))
+ grp.variables['hru_min_dist'][:] = data['hsu']['hru_min_dist']
+
 
  #Write other metadata
  #grp = fp.createGroup('metadata')
@@ -413,6 +448,7 @@ def Compute_HRUs_Semidistributed_Kmeans(covariates,mask,nclusters,hydrobloks_inf
         'tree30':{'data':covariates['tree30'][mask_nc == True],},
         'lats':{'data':covariates['lats'][mask_nc == True],},
         'lons':{'data':covariates['lons'][mask_nc == True],},
+        'irrig_land':{'data':covariates['irrig_land'][mask_nc == True],},
         }
 
  #Subset the chosen ones for the non-channels
@@ -505,6 +541,7 @@ def Compute_HRUs_Semidistributed_Kmeans(covariates,mask,nclusters,hydrobloks_inf
  clf = sklearn.cluster.MiniBatchKMeans(nclusters_nc,random_state=1,init=init,batch_size=batch_size,init_size=init_size)
  clf.fit(Xf)#
  clf_output = clf.predict(X)
+ 
  #Reassign the ids
  clf_output_copy = np.copy(clf_output)
  for cid in xrange(len(np.unique(clf_output))):
@@ -645,12 +682,16 @@ def Assign_Parameters_Semidistributed(covariates,metadata,hydrobloks_info,OUTPUT
  #Initialize the arrays
  vars = ['area','area_pct','BB','DRYSMC','F11','MAXSMC','REFSMC','SATPSI',
          'SATDK','SATDW','WLTSMC','QTZ','slope','ti','dem','carea','channel',
-         'land_cover','soil_texture_class',
+         'land_cover','soil_texture_class','clay',
+         'centroid_lats', 'centroid_lons',
+         'irrig_land', 'start_growing_season', 'end_growing_season', 
          'mannings','m','psoil','pksat','sdmax']
+
  OUTPUT['hsu'] = {}
+ OUTPUT['hsu']['hru_min_dist'] = np.zeros((nclusters,nclusters))
  for var in vars:
   OUTPUT['hsu'][var] = np.zeros(nclusters)
-
+ 
  #Metadata
  #NLCD2NOAH = {11:17,12:15,21:10,22:10,23:10,24:13,31:16,41:4,42:1,43:5,51:6,52:6,71:10,72:10,73:19,74:19,81:10,82:12,90:11,95:11}
  for hsu in np.arange(nclusters):
@@ -661,7 +702,7 @@ def Assign_Parameters_Semidistributed(covariates,metadata,hydrobloks_info,OUTPUT
   #Calculate area percentage per hsu
   OUTPUT['hsu']['area_pct'][hsu] = 100*OUTPUT['hsu']['area'][hsu]/(metadata['resx']**2*mask[mask].size)
   #Soil properties
-  for var in ['BB','DRYSMC','F11','MAXSMC','REFSMC','SATPSI','SATDK','SATDW','WLTSMC','QTZ']:
+  for var in ['BB','DRYSMC','F11','MAXSMC','REFSMC','SATPSI','SATDK','SATDW','WLTSMC','QTZ','clay']:
    if var in ['SATDK','SATDW']:
     OUTPUT['hsu'][var][hsu] = stats.mstats.hmean(covariates[var][idx])
    else:
@@ -695,7 +736,68 @@ def Assign_Parameters_Semidistributed(covariates,metadata,hydrobloks_info,OUTPUT
   if np.max(covariates['carea'][idx]) >= 100000.0: OUTPUT['hsu']['mannings'][hsu] = 0.03 #manning's n for channel flow (0.01-0.1)
   else: OUTPUT['hsu']['mannings'][hsu] = 0.15 #manning's n for overland flow (0.01-0.8)
 
+  # Water Management Variables
+  # Irrigation: 1 Irrigated, 2 paddy crop, 0 others
+  OUTPUT['hsu']['irrig_land'][hsu] = int(stats.mode(covariates['irrig_land'][idx])[0][0]) 
+  # Crop Calendar
+  OUTPUT['hsu']['start_growing_season'][hsu] = int(stats.mode(covariates['start_growing_season'][idx])[0][0])
+  OUTPUT['hsu']['end_growing_season'][hsu] = int(stats.mode(covariates['end_growing_season'][idx])[0][0])
+  #HRU Centroids for water management
+  #clon, clat = Get_HRUs_Centroid(hsu, cluster_ids, covariates['lats'], covariates['lons']) 
+  OUTPUT['hsu']['centroid_lons'][hsu] = np.nanmean(covariates['lons'][idx])
+  OUTPUT['hsu']['centroid_lats'][hsu] = np.nanmean(covariates['lats'][idx])
+  
+ for hsu in np.arange(nclusters):
+  #HRU distance between the centroids of the hru and all the other hrus 
+  OUTPUT['hsu']['hru_min_dist'][hsu,:] = Calculate_Min_Distance(hsu, nclusters, cluster_ids, covariates['lats'], covariates['lons'], OUTPUT['hsu']['centroid_lats'], OUTPUT['hsu']['centroid_lons'])
+  
  return OUTPUT
+
+
+
+def Calculate_Min_Distance(hsu,nclusters,cluster_ids,lats,lons,clats,clons):
+  radius = 6367.0
+
+  # Get lat lon from the borders
+  idx = (cluster_ids == hsu)
+  idx = clear_border(idx,bgval=False)
+  idx = find_boundaries(idx, mode='inner')
+  bd_lats = lats[idx].flatten()
+  bd_lons = lons[idx].flatten()
+
+  # Get unique lat,lon values and sample 50 points
+  points = set(zip(bd_lats,bd_lons))
+  nsamp = 30
+  if len(points) <= nsamp: nsamp = int(len(points)/2.)
+  if len(points) <= 5: nsamp = len(points)
+
+  points = random.sample(points, nsamp)
+  bd_lats = np.array(zip(*points)[0])
+  bd_lons = np.array(zip(*points)[1])
+  
+  distance = np.ones(nclusters)*10000000.
+  
+  #Calculate the distance of a boundary to a centroid of each hru
+  for hrs in range(nclusters):
+    if hrs == hsu:
+      distance[hrs] = 0.0
+    else:
+      clat = clats[hrs]
+      clon = clons[hrs]
+
+      for lat, lon in zip(bd_lats,bd_lons):
+        dlat = np.radians(lat-clat)
+        dlon = np.radians(lon-clon)
+        a = np.sin(dlat/2) * np.sin(dlat/2) + np.cos(np.radians(clat)) \
+          * np.cos(np.radians(lat)) * np.sin(dlon/2) * np.sin(dlon/2)
+        c = 2 * np.math.atan2(np.sqrt(a), np.sqrt(1-a))
+        dist = radius * c
+        if dist < distance[hrs]: distance[hrs] = dist
+      #print hsu, hrs, dist, distance[hrs] 
+
+  return distance
+  
+
 
 def Calculate_Flow_Matrix(covariates,cluster_ids,nclusters):
 
@@ -857,7 +959,10 @@ def Create_and_Curate_Covariates(wbd):
  covariates['lons'] = lons.T
  
  #Add sti
- sti = covariates['ti'] - np.log(0.1*covariates['SATDK']) + np.log(np.mean(0.1*covariates['SATDK']))
+ satdk = covariates['SATDK']
+ satdk[satdk==-9999.0] = np.nan
+ sti = covariates['ti'] - np.log(0.1*satdk) + np.log(np.nanmean(0.1*satdk))
+ sti[sti==np.nan]=-9999.0
  covariates['sti'] = sti
 
  #Define the mask
@@ -872,15 +977,15 @@ def Create_and_Curate_Covariates(wbd):
   mask0 = (np.isinf(covariates[var]) == 1) | (np.isnan(covariates[var]) == 1)
 
   if var in ['fdir','nlcd','TEXTURE_CLASS','lc']:
-   if len(covariates[var][mask1]) < 1: print "Full of Nan's Error: 1", var, covariates[var],  wbd['files'][var] # Noemi insert
+   if len(covariates[var][mask1]) < 1: print "Full of Nan's Error: 1", var, covariates[var], wbd['files'][var] # Noemi 
    covariates[var][mask0] = -9999.0 #stats.mode(covariates[var][mask1])[0][0]
   else:
    covariates[var][mask0] = -9999.0 #np.mean(covariates[var][mask1])
 
  #Set everything that is -9999 to the mean
  for var in covariates:
-  if var in ['fdir','nlcd','TEXTURE_CLASS','lc']:  
-   if len(covariates[var][covariates[var] != -9999.0])  < 1: print "Full of Nan's Error: ", var, covariates[var],  wbd['files'][var] # Noemi insert
+  if len(covariates[var][covariates[var] != -9999.0]) < 1: print "Error: Covariate %s is full of Nan's" % (var), covariates[var], wbd['files'][var] # Noemi insert
+  if var in ['fdir','nlcd','TEXTURE_CLASS','lc']: 
    covariates[var][covariates[var] == -9999.0] = stats.mode(covariates[var][covariates[var] != -9999.0])[0][0]  
   else:
    covariates[var][covariates[var] == -9999.0] = np.mean(covariates[var][covariates[var] != -9999.0])
@@ -924,8 +1029,9 @@ def Create_Clusters_And_Connections(workspace,wbd,output,input_dir,nclusters,nco
  hydrobloks_info['input_fp'].createDimension('hsu',nhsu)
  hydrobloks_info['input_fp'].createDimension('time',ntime)
  
-  #Create the groups (netcdf)
+ #Create the groups (netcdf)
  hydrobloks_info['input_fp'].createGroup('meteorology')
+ hydrobloks_info['input_fp'].createGroup('water_use')
 
  #Prepare the flow matrix
  print "Calculating the flow matrix"
@@ -1107,7 +1213,146 @@ def Prepare_Meteorology_Semidistributed(workspace,wbd,OUTPUT,input_dir,info,hydr
   grp.createVariable(var,'f4',('time','hsu'))
   grp.variables[data_var][:] = meteorology[data_var][:]
 
- return 
+ return
+
+
+def Prepare_Water_Use_Semidistributed(workspace,wbd,OUTPUT,input_dir,info,hydrobloks_info):
+
+ #Define the mapping directory
+ mapping_info = {}
+ 
+ #Calculate the fine to coarse scale mapping
+ for data_var in wbd['files_water_use']:
+
+  #Define the variable name
+  var = data_var#data_var.split('_')[1]
+  mapping_info[var] = {}
+
+  #Read in the coarse and fine mapping
+  file_coarse = '%s/%s_latlon_coarse.tif' % (workspace,data_var)
+  file_fine = '%s/%s_ea_fine.tif' % (workspace,data_var)
+  mask_coarse = gdal_tools.read_raster(file_coarse)
+  mask_fine = gdal_tools.read_raster(file_fine)
+  nlat = mask_coarse.shape[0]
+  nlon = mask_coarse.shape[1]
+
+  # NOAH Land Cover code for each water use sector
+  water_use_land_cover = {'industrial':[13,16],'domestic':[7,8,9,10,13,16],'livestock':[7,8,9,10,16], "agriculture":[12,14]}
+  
+  # 1. Identify location of each type of water use
+  md = gdal_tools.retrieve_metadata('%s/lc_ea.tif' % workspace)
+  md['nodata'] = -9999.0
+  data = gdal_tools.read_raster('%s/lc_ea.tif' % workspace)
+  NOAH_lc_values = np.arange(21)
+  data[ data == md['nodata'] ] = 0.0
+
+  for imask in NOAH_lc_values:
+    if imask in water_use_land_cover[data_var]:
+      data[data == imask] = 1.0
+    else:
+      data[data == imask] = 0.0
+  wuse_lc_ea_file = '%s/%s_lc_ea.tif' % (workspace,data_var)
+  gdal_tools.write_raster(wuse_lc_ea_file,md,data)
+  fine_size = data.shape
+  fine_res = abs(md['resx'])
+  
+  # Get the coarse water use info and regrid the fine lc to coarser lc
+  wuse_lc_coarse_file = '%s/%s_latlon_coarse.tif' % (workspace,data_var)
+  md = gdal_tools.retrieve_metadata(wuse_lc_coarse_file)
+  minx = md['minx']
+  miny = md['miny']
+  maxx = md['maxx']
+  maxy = md['maxy']
+  res  = abs(md['resx'])
+  lproj = md['proj4']+' +datum=WGS84'
+  file_in = wuse_lc_ea_file
+  file_out = '%s/%s_area_latlon_coarse.tif' % (workspace,data_var)
+  os.system('gdalwarp -overwrite -t_srs \'%s\' -ot Float32 -dstnodata -9999 -tr %f %f -te %f %f %f %f -r average -q %s %s ' % (lproj,res,res,minx,miny,maxx,maxy,file_in,file_out))
+
+  # Calculate the equivalent area of each grid
+  data = gdal_tools.read_raster(file_out)
+  md['nodata'] = -9999.0
+  data[ data == md['nodata'] ] = 0.0
+  coarse_size = data.shape
+  data_grid_area = fine_res*fine_res*(fine_size[0]/coarse_size[0])*(fine_size[1]/coarse_size[1])
+  data = data*data_grid_area
+  gdal_tools.write_raster(file_out,md,data)
+
+  #Compute the mapping for each hsu
+  for hsu in np.arange(hydrobloks_info['nclusters']):
+   idx = OUTPUT['hsu_map'] == hsu
+   #print "Catch:",hydrobloks_info['icatch'], "HRU: ", mask_fine[idx].astype(np.int)
+   icells = np.unique(mask_fine[idx][mask_fine[idx] != -9999.0].astype(np.int))   # Add != -9999 for unique and bicount - Noemi
+   counts = np.bincount(mask_fine[idx][mask_fine[idx] != -9999.0].astype(np.int))
+   coords,pcts = [],[]
+   for icell in icells:
+    ilat = int(np.floor(icell/mask_coarse.shape[1]))
+    jlat = icell - ilat*mask_coarse.shape[1]
+    #ilat = int(mask_coarse.shape[0] - ilat - 1) #CAREFUL
+    pct = float(counts[icell])/float(np.sum(counts))
+    coords.append([ilat,jlat])
+    pcts.append(pct)
+   pcts = np.array(pcts)
+   coords = list(np.array(coords).T)
+   mapping_info[var][hsu] = {'pcts':pcts,'coords':coords}
+
+ #Iterate through variable creating water use product per HSU
+ idate = info['time_info']['startdate']
+ fdate = info['time_info']['enddate']
+ dt = info['time_info']['dt']
+ nt = int(3600*24/dt)*((fdate - idate).days+1)
+
+ #Create structured array
+ water_use = {}
+ for data_var in wbd['files_water_use']:
+  water_use[data_var] = np.zeros((nt,hydrobloks_info['nclusters']))
+
+ #Load data into structured array
+ for data_var in wbd['files_water_use']:
+  var = data_var
+  date = idate
+  file = wbd['files_water_use'][data_var]
+  fp = nc.Dataset(file)
+  #Determine the time steps to retrieve
+  fidate = ' '.join(fp.variables['t'].units.split(' ')[2::])
+  dates = nc.num2date(fp.variables['t'][:],units='hours since %s' % fidate)
+  mask_dates = (dates >= idate) & (dates <= fdate)
+  data = np.ma.getdata(fp.variables[var][mask_dates,:,:])
+  fp.close()
+  
+  # convert water use volume from m3 to m3/m2
+  file_out = '%s/%s_area_latlon_coarse.tif' % (workspace,data_var)
+  wuse_area = gdal_tools.read_raster(file_out)
+  m = ( wuse_area == 0.0 )
+  data[:,m] = 0.0
+  wuse_area[m] = 1.0
+  data = data/wuse_area
+ 
+
+  #Assing to hsus
+  for hsu in mapping_info[var]:
+   if OUTPUT['hsu']['land_cover'][hsu] in water_use_land_cover[data_var]:
+    #print data_var,data, data.shape, hsu,mapping_info[var][hsu]['pcts'],mapping_info[var][hsu]['coords'],
+    pcts = mapping_info[var][hsu]['pcts']
+    coords = mapping_info[var][hsu]['coords']
+    coords[0][coords[0] >= data.shape[1]] = data.shape[1] - 1
+    coords[1][coords[1] >= data.shape[2]] = data.shape[2] - 1
+    tmp = data[:,coords[0],coords[1]]
+    tmp = pcts*tmp
+    water_use[data_var][:,hsu] = np.sum(tmp,axis=1)  # final variable m3/m2/s --> m/s of water demand
+    #print hsu, data_var, OUTPUT['hsu']['land_cover'][hsu], water_use[data_var][:,hsu]
+   else:
+    water_use[data_var][:,hsu] = 0.0
+
+  #Write the water use the netcdf file (single chunk for now...)
+  grp = hydrobloks_info['input_fp'].groups['water_use']
+  grp.createVariable(var,'f4',('time','hsu'))
+  grp.variables[data_var][:] = water_use[data_var][:]
+
+ return
+
+
+ 
 
 def Read_Metadata_File(file):
 
