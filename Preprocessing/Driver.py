@@ -23,34 +23,30 @@ hydrobloks_info = {
         'icatch':metadata['catchment_id'],
 	'input_file':metadata['input_file'],
 	'output_file':metadata['output_file'],
-        #'soil_file':metadata['soil_file'],
         'workspace':metadata['workspace'],
 	'surface_flow_flag':metadata['surface_flow_flag'],
 	'subsurface_flow_flag':metadata['subsurface_flow_flag'],
 	'dt':metadata['dt'],#seconds
-	'dtt':metadata['dtt'],#seconds
 	'dx':metadata['dx'],#meters
 	'nsoil':metadata['nsoil'],
 	'ncores':metadata['parallel_ncores'],
 	'idate':idate,
 	'fdate':fdate,
-	'nclusters_nc':metadata['nhru_nc'],
-	'nclusters_c':metadata['nhru_c'],
-	'nclusters':metadata['nhru_nc'] + metadata['nhru_c'],
+	'nclusters':metadata['nhru'],
 	'model_type':metadata['model_type'],
-        'create_mask_flag':metadata['create_mask_flag'],
-        'covariates':metadata['covariates'],
-        'clustering_type':metadata['clustering_type'],
-        'hillslope_info':metadata['hillslope_info'],
-        'basin_info':metadata['basin_info'],	
-    "hwu_flag":metadata['hwu_flag'],
-    "hwu_sf_flag":metadata['hwu_sf_flag'],
-    "hwu_gw_flag":metadata['hwu_gw_flag'],
-    "hwu_agric_flag":metadata['hwu_agric_flag'],
-    "hwu_domest_flag":metadata['hwu_domest_flag'],
-    "hwu_indust_flag":metadata['hwu_indust_flag'],
-    "hwu_lstock_flag":metadata['hwu_lstock_flag'],
+    'create_mask_flag':metadata['create_mask_flag'],
+    'covariates':metadata['covariates'],
+    'hwu_flag':metadata['hwu_flag'],
+    'hwu_sf_flag':metadata['hwu_sf_flag'],
+    'hwu_gw_flag':metadata['hwu_gw_flag'],
+    'hwu_agric_flag':metadata['hwu_agric_flag'],
+    'hwu_domest_flag':metadata['hwu_domest_flag'],
+    'hwu_indust_flag':metadata['hwu_indust_flag'],
+    'hwu_lstock_flag':metadata['hwu_lstock_flag'],
     }
+
+
 
 #Cluster the data
 Preprocessing.Prepare_Model_Input_Data(hydrobloks_info)
+
