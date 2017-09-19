@@ -20,12 +20,12 @@ fdate = datetime.datetime(metadata['enddate']['year'],
 
 #Define the info
 hydrobloks_info = {
-        'icatch':metadata['catchment_id'],
+    'icatch':metadata['catchment_id'],
 	'input_file':metadata['input_file'],
 	'output_file':metadata['output_file'],
-        'workspace':metadata['workspace'],
+    'workspace':metadata['workspace'],
 	'surface_flow_flag':metadata['surface_flow_flag'],
-	'subsurface_flow_flag':metadata['subsurface_flow_flag'],
+	'subsurface_module':metadata['subsurface_module'],
 	'dt':metadata['dt'],#seconds
 	'dx':metadata['dx'],#meters
 	'nsoil':metadata['nsoil'],

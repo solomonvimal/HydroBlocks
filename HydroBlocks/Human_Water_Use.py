@@ -10,8 +10,12 @@ import matplotlib.pyplot as plt
 
 class Human_Water_Use:
 
- def __init__(self,NOAH,TOPMODEL,info,ncells):
-  self.ncells = ncells
+ def __init__(self,HB,info):
+
+  NOAH = HB.noahmp
+  TOPMODEL = HB.dtopmodel
+     
+  ncells = NOAH.ncells
   self.itime = 0
 
   self.hwu_flag = info['hwu_flag']
@@ -44,11 +48,11 @@ class Human_Water_Use:
  
   # Optimal Allocation
   self.hwu_optimal_allocation_flag = True
- 
+
   # GROUNDWATER supply variables
   if self.hwu_gw_flag == True:
    # Well_depht
-   self.well_depth = -3   
+   self.well_depth = -3
    # Correct well_depht for shallow soils and add 25% buffer.
    self.well_depth = np.maximum(self.well_depth,NOAH.zsoil[:,-1]*0.75)
    self.supply_gw = np.zeros(ncells,dtype=np.float64)
@@ -68,7 +72,7 @@ class Human_Water_Use:
    self.alloc_sf  = np.zeros(ncells,dtype=np.float64)
 
    # Surface Water availability where ti > 10 and slope < 0.01
-   cond1 = ( TOPMODEL.sti >= 10.0 ) & ( TOPMODEL.beta < 0.01) 
+   cond1 = ( TOPMODEL.sti >= 10.0 ) & ( TOPMODEL.beta < 0.01)
    # Surface Water in water Bodies and/or wetlands
    cond2 = np.array([ True if x in self.water_use_land_cover["surface_water"] else False for x in NOAH.vegtyp ])
    self.mask_sf    = np.array([ True if i==True or j==True else False for i,j in zip(cond1,cond2) ])
@@ -77,7 +81,7 @@ class Human_Water_Use:
    # Maximum slope allowed for upstream abstraction
    self.sf_slope_lim = -1./1000. # m/m 
 
- 
+
   # AGRICULTURE demand variables
   if self.hwu_agric_flag == True:
    self.deficit_agric = np.zeros(ncells,dtype=np.float64)
@@ -89,19 +93,18 @@ class Human_Water_Use:
 
    # Irrigation
    # 1: non-paddy irrigation, 2: paddy irrigation, 0: others
-   self.irrig_land = info['input_fp'].groups['parameters'].variables['irrig_land'][:]
-   self.mask_irrig = ( self.mask_agric == True) & ( self.irrig_land > 0.0 ) 
+   self.irrig_land = HB.input_fp.groups['parameters'].variables['irrig_land'][:]
+   self.mask_irrig = ( self.mask_agric == True) & ( self.irrig_land > 0.0 )
    self.mask_irrig = np.copy(self.mask_agric)
-      
+
    # Crop calendar
-   self.st_gscal = np.asarray(info['input_fp'].groups['parameters'].variables['start_growing_season'][:],dtype=np.int)
-   self.en_gscal = np.asarray(info['input_fp'].groups['parameters'].variables['end_growing_season'][:],dtype=np.int)
+   self.st_gscal = np.asarray(HB.input_fp.groups['parameters'].variables['start_growing_season'][:],dtype=np.int)
+   self.en_gscal = np.asarray(HB.input_fp.groups['parameters'].variables['end_growing_season'][:],dtype=np.int)
    self.gscal = cost_funcs.calc_calendar(self,ncells)
    m = np.where(np.invert(self.mask_agric))[0]
    self.gscal[m,:] = 0
    # Test for the case with demand but zero irrigation
-    
-   
+
 
   # INDUSTRIAL demand variables
   if self.hwu_indust_flag == True:
@@ -126,13 +129,19 @@ class Human_Water_Use:
    self.mask_lstock    = [True if x in self.water_use_land_cover['livestock'] else False for x in NOAH.vegtyp ]
    self.wuse_index['l'] = len(self.wuse_index)
 
-  self.nwuse_index = len(self.wuse_index)  
+  self.nwuse_index = len(self.wuse_index)
 
 
- def Initialize_Allocation(self,NOAH,TOPMODEL,info):
 
+ def initialize_allocation(self,HB):
+  NOAH = HB.noahmp
+  TOPMODEL = HB.dtopmodel
+  
+ 
   if self.hwu_flag == True:
-   ncells = self.ncells
+   ncells = NOAH.ncells
+   self.dta = HB.dt
+   self.ntt = int(HB.dt/HB.dtt)
 
    # HRU distances
    # OPT 1) Centroid Distances
@@ -140,7 +149,7 @@ class Human_Water_Use:
    #self.ctrd_lons = info['input_fp'].groups['parameters'].variables['centroid_lons'][:]
    #self.hrus_distances = cost_funcs.hrus_centroid_distance(self.ctrd_lats,self.ctrd_lons)  # km
    # OPT 2) Minimum Distance between a HRU centroid and it's neighboors boundary 
-   self.hru_min_dist = info['input_fp'].groups['parameters'].variables['hru_min_dist'][:]
+   self.hru_min_dist = HB.input_fp.groups['parameters'].variables['hru_min_dist'][:]
    self.hrus_distances = self.hru_min_dist  # km
    print "HRU's distances - mean:%f and std:%f" % (np.mean(self.hrus_distances[self.hrus_distances>0.]), np.std(self.hrus_distances[self.hrus_distances>0.]))
    #plt.hist(self.hru_min_dist.flatten())
@@ -149,16 +158,16 @@ class Human_Water_Use:
    # HRU relative distances - Review this
    self.hrus_rel_dist = np.copy(self.hrus_distances)
    for i in range(ncells): self.hrus_rel_dist[i,:] = self.hrus_distances[i,:]/np.sum(self.hrus_distances[i,:])
-   
+
    # Calculate slope between HRUs
    self.hrus_slopes = cost_funcs.hrus_slope(TOPMODEL.dem,self.hrus_distances)  # m/m
-   
+
 
    # SURFACE WATER RATIO AND COST
    if self.hwu_sf_flag == True:
     # Surface Water Ratio 
     self.ratio_sf = np.ones((self.nwuse_index,ncells,ncells))
-    
+
     # Update Ratio for Demands
     if self.hwu_agric_flag == True:
       m = np.invert(self.mask_irrig)
@@ -178,16 +187,16 @@ class Human_Water_Use:
     m = (self.hrus_distances > self.sf_dist_lim ); self.ratio_sf[:,m] = 0.0
     m = (self.hrus_slopes    < self.sf_slope_lim); self.ratio_sf[:,m] = 0.0
     # sum over the diff water sectors, then over the demand nodes
-    total_ratio_sf = np.sum(np.sum(self.ratio_sf, axis=0),axis=1) 
+    total_ratio_sf = np.sum(np.sum(self.ratio_sf, axis=0),axis=1)
     # update mask to only simulate over the active supply nodes
     self.mask_sf = (self.mask_sf == True) & ( total_ratio_sf > 0.0)
-    
+
     # Update Ratio to relative values
     #m = self.ratio_sf > 0.0
     #for n in ln: 
     # for i in li:
     #   self.ratio_sf[n,i,:] = 1.0-self.hrus_distances[i,:]/np.sum(self.hrus_distances[i,:])
- 
+
     # Surface Water Cost
     self.cost_sf    = np.ones((self.nwuse_index,ncells,ncells))
     self.cost_sf[:] = self.hrus_distances
@@ -233,11 +242,11 @@ class Human_Water_Use:
       print a,b, c
       self.ratio_gw[0,i,:][m] = 1.0-c
     '''
-     
+
     # Groundwater Cost
     self.cost_gw     = np.ones((self.nwuse_index,ncells,ncells))
     self.cost_gw[:]  = self.hrus_distances#*(self.sf_dist_lim/self.gw_dist_lim)
-    
+
 
    # INITIALIZE ALLOCATION MODEL
    if self.hwu_optimal_allocation_flag == True:
@@ -246,7 +255,7 @@ class Human_Water_Use:
     from pywr.core import Input as wr_Input
     from pywr.core import Output as wr_Output
     from pywr.core import Link as wr_Link
-    
+
     # Define Model
     #self.ntwkm = wr_Model(start="2017-01-01", end="2017-01-01", timestep=1, solver='lpsolve')
     self.ntwkm = wr_Model(start="2017-01-01", end="2017-01-01", timestep=1, solver='glpk')
@@ -282,18 +291,18 @@ class Human_Water_Use:
 
     if self.hwu_sf_flag == True:
      s_nodes_names=[] #Suface Water
-     m = self.mask_sf   
+     m = self.mask_sf
      for i in np.where(m)[0]:
       surf = wr_Input( self.ntwkm, name='s%i' % i, min_flow = 0.0, max_flow = 0.0, cost=1)
       s_nodes_names.append('s%i' % i)
 
-    if self.hwu_gw_flag == True:  
+    if self.hwu_gw_flag == True:
      g_nodes_names=[] #Groundwater
-     m = self.mask_gw 
+     m = self.mask_gw
      for i in np.where(m)[0]:
       gw = wr_Input( self.ntwkm, name='g%i' % i, min_flow = 0.0, max_flow = 0.0, cost=1)
       g_nodes_names.append('g%i' % i)
-   
+
 
     # Define Surface Nodes Connections
     if self.hwu_sf_flag == True:
@@ -309,11 +318,11 @@ class Human_Water_Use:
 
     # Define Groundwater Nodes Connections
     if self.hwu_gw_flag == True:
-     g_links_names = [] 
+     g_links_names = []
      m = self.ratio_gw > 0.0
      gw_valid_links = m.flatten()
      for n,i,j in zip(*np.where(m)):
-      n = self.wuse_index.keys()[n]      
+      n = self.wuse_index.keys()[n]
       link_gw = wr_Link(self.ntwkm, name='g%i_%s%i' % (i,n,j), min_flow = 0.0, max_flow = 0.0)
       self.ntwkm.nodes['g%i'%i].connect(link_gw)
       link_gw.connect(self.ntwkm.nodes['%s%i'% (n,j)])
@@ -328,12 +337,13 @@ class Human_Water_Use:
         self.valid_links = np.concatenate([sf_valid_links,gw_valid_links])
     elif self.hwu_gw_flag == True or any(gw_valid_links):
         self.valid_links = gw_valid_links
-   
-    
+
+
+
     #Model Setup
     # Test for valid nodes and connections
     if any(self.valid_links):
-      
+
       #self.ntwkm.check()
       self.ntwkm.setup()
 
@@ -347,10 +357,10 @@ class Human_Water_Use:
       #print nodes_list[0][0].max_flow    
       nodes_names = [ str(self.nodes_list[i][0].name) for i in range(n_nodes) ]
       nodes_types = [ str(self.nodes_list[i][0].__class__.__name__) for i in range(n_nodes) ]
-    
+
       # Order the list - List containing the ordered position of each node and link
       # Demands, Supply, Groundwater, Link_i_j
-      if self.hwu_agric_flag == True: 
+      if self.hwu_agric_flag == True:
         self.a_nodes_position = []
         for i in a_nodes_names: self.a_nodes_position.append( nodes_names.index(i) )
       if self.hwu_domest_flag == True:
@@ -368,43 +378,50 @@ class Human_Water_Use:
         for i in s_nodes_names: self.s_nodes_position.append( nodes_names.index(i) )
         self.s_links_position = []
         for i in s_links_names: self.s_links_position.append( nodes_names.index(i) )
-  
+
       if self.hwu_gw_flag == True:
         self.g_nodes_position = []
         for i in g_nodes_names: self.g_nodes_position.append( nodes_names.index(i) )
         self.g_links_position = []
         for i in g_links_names: self.g_links_position.append( nodes_names.index(i) )
- 
+
       #print len(s_nodes_names), len(g_nodes_names), len(s_links_names), len(g_links_names)
       #print n_nodes
       #print d_nodes_names[:10]
       #print self.d_nodes_position[:10]
       #print [ nodes_names[i] for i in self.d_nodes_position[:10] ]
-    
+
       #self.ntwkm.graph.nodes[0][0].max_flow=9876
       #print self.ntwkm.graph.nodes[0][0].max_flow
       #print "Allocation Network Done!"
+
+
+
+
+
     return 
 
 
 
- def Calc_Human_Water_Demand_Supply(self,NOAH,TOPMODEL,HB):
-   dta = self.dta
+ def Calc_Human_Water_Demand_Supply(self,HB):
+   NOAH = HB.noahmp
+   TOPMODEL = HB.dtopmodel
+   
    if self.hwu_agric_flag  == True:
     # Calculate Agricultural Demand
-    self.demand_agric = self.Agriculture_Demand(NOAH,HB)/dta #m/s
+    self.demand_agric = self.Agriculture_Demand(HB)/self.dta #m/s
     # Convert from m/s to m3
-    self.deficit_agric = np.copy(self.demand_agric)*dta*TOPMODEL.area
+    self.deficit_agric = np.copy(self.demand_agric)*self.dta*TOPMODEL.area
 
    if self.hwu_flag == True:
     # Convert from m/s to m3
-    if self.hwu_indust_flag == True: self.deficit_indust = np.copy(self.demand_indust)*dta*TOPMODEL.area
-    if self.hwu_domest_flag == True: self.deficit_domest = np.copy(self.demand_domest)*dta*TOPMODEL.area
-    if self.hwu_lstock_flag == True: self.deficit_lstock = np.copy(self.demand_lstock)*dta*TOPMODEL.area
+    if self.hwu_indust_flag == True: self.deficit_indust = np.copy(self.demand_indust)*self.dta*TOPMODEL.area
+    if self.hwu_domest_flag == True: self.deficit_domest = np.copy(self.demand_domest)*self.dta*TOPMODEL.area
+    if self.hwu_lstock_flag == True: self.deficit_lstock = np.copy(self.demand_lstock)*self.dta*TOPMODEL.area
 
    if self.hwu_flag == True:
     # Calculate Supply [m]
-    self.Calc_Water_Supply(NOAH,TOPMODEL,HB,dta)
+    self.Calc_Water_Supply(HB)
     # Convert m to m3
     if self.hwu_sf_flag == True: self.supply_sf = self.supply_sf*TOPMODEL.area
     if self.hwu_gw_flag == True: self.supply_gw = self.supply_gw*TOPMODEL.area
@@ -419,15 +436,15 @@ class Human_Water_Use:
     # Allocation
     if self.hwu_optimal_allocation_flag == True: 
      self.Optimal_Water_Allocation(NOAH,TOPMODEL)
-
+   
    # Convert from m3 to m/s
-   if self.hwu_agric_flag  == True: self.deficit_agric  = self.deficit_agric/dta/TOPMODEL.area
+   if self.hwu_agric_flag  == True: self.deficit_agric  = self.deficit_agric/self.dta/TOPMODEL.area
 
    if self.hwu_flag == True:
     # Convert from m3 to m/s  
-    if self.hwu_indust_flag == True: self.deficit_indust = self.deficit_indust/dta/TOPMODEL.area
-    if self.hwu_domest_flag == True: self.deficit_domest = self.deficit_domest/dta/TOPMODEL.area
-    if self.hwu_lstock_flag == True: self.deficit_lstock = self.deficit_lstock/dta/TOPMODEL.area
+    if self.hwu_indust_flag == True: self.deficit_indust = self.deficit_indust/self.dta/TOPMODEL.area
+    if self.hwu_domest_flag == True: self.deficit_domest = self.deficit_domest/self.dta/TOPMODEL.area
+    if self.hwu_lstock_flag == True: self.deficit_lstock = self.deficit_lstock/self.dta/TOPMODEL.area
 
     if self.hwu_agric_flag  == True: self.alloc_agric  = self.alloc_agric/TOPMODEL.area/self.ntt
     if self.hwu_gw_flag == True : self.alloc_gw = self.alloc_gw/TOPMODEL.area/self.ntt
@@ -435,12 +452,15 @@ class Human_Water_Use:
 
     if self.hwu_sf_flag == True: self.supply_sf = self.supply_sf/TOPMODEL.area
     if self.hwu_gw_flag == True: self.supply_gw = self.supply_gw/TOPMODEL.area
-
+   
    #print self.date, self.alloc_agric, self.alloc_gw
    return
 
 
- def Calc_Water_Supply(self,NOAH,TOPMODEL,HB,dta):
+ def Calc_Water_Supply(self,HB):
+  NOAH = HB.noahmp
+  TOPMODEL = HB.dtopmodel
+  
   if self.hwu_flag == True:
 
    # Groundwater Supply
@@ -453,14 +473,17 @@ class Human_Water_Use:
 
    # Surface Water Supply
    if self.hwu_sf_flag == True :
-    self.supply_sf = NOAH.runsf*dta/1000. # from mm/s to m
+    self.supply_sf = NOAH.runsf*self.dta/1000. # from mm/s to m
     # Future Include correction for environmetal flows.
     self.supply_sf = self.supply_sf*0.8
 
   return
 
 
- def Water_Supply_Abstraction(self, NOAH, TOPMODEL, HB):
+ def Water_Supply_Abstraction(self, HB):
+  NOAH = HB.noahmp
+  TOPMODEL = HB.dtopmodel
+
   if self.hwu_flag == True:
 
    # Abstract from Surface
@@ -473,9 +496,11 @@ class Human_Water_Use:
     m = (self.alloc_gw > 0.0)
     NOAH.dzwt[m] = (NOAH.dzwt-(self.alloc_gw))[m]  # m
 
- def Human_Water_Irrigation(self,NOAH,TOPMODEL,HB):
+ def Human_Water_Irrigation(self,HB):
+  NOAH = HB.noahmp
+  TOPMODEL = HB.dtopmodel
+  
   if self.hwu_flag == True:
-
    if self.hwu_agric_flag  == True:
     # Add as irrigation the amount of water that was allocated
     self.irrigation[:] = self.alloc_agric*1000/NOAH.dt 
@@ -487,8 +512,9 @@ class Human_Water_Use:
   return
 
 
- def Optimal_Water_Allocation(self,NOAH,TOPMODEL):
-    ncells = self.ncells
+ def Optimal_Water_Allocation(self,NOAH,TOPMODEL):  
+
+    ncells = NOAH.ncells
    
     if any(self.valid_links.flatten()):
 
@@ -627,16 +653,19 @@ class Human_Water_Use:
      return
 
 
- def Agriculture_Demand(self,NOAH,HB):
-
-  self.demand_agric = self.Calculate_Irrigation_Deficit(NOAH) # m
+ def Agriculture_Demand(self,HB):
+  NOAH = HB.noahmp
+  TOPMODEL = HB.dtopmodel
+  HWU = HB.hwu
+  
+  demand_agric = self.Calculate_Irrigation_Deficit(NOAH) # m
  
   # Limit Demand for the Crop Calendar
-  mnt = self.date.month-1
-  m = self.gscal[:,mnt] == 0
-  self.demand_agric[m] = 0.0  
+  mnt = HB.idate.month-1
+  m = HWU.gscal[:,mnt] == 0
+  demand_agric[m] = 0.0  
 
-  return self.demand_agric
+  return demand_agric
 
 
  def Calculate_Irrigation_Deficit(self,NOAH):

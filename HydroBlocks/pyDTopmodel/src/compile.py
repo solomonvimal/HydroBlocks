@@ -8,8 +8,8 @@ os.system('rm -f *.o')
 #mkl_library = '/opt/intel/mkl/lib'
 #mkl_include = '/opt/apps/intel/13/composer_xe_2013_sp1.1.106/mkl/include'
 #mkl_library = '/opt/apps/intel/13/composer_xe_2013_sp1.1.106/mkl/lib/intel64'
-mkl_include = '/opt/intel/composer_xe_2015.2.164/mkl/include'
-mkl_library = '/opt/intel/composer_xe_2015.2.164/mkl/lib/intel64'
+mkl_include = '/opt/intel/compilers_and_libraries_2017.4.196/linux/mkl/include'
+mkl_library = '/opt/intel/compilers_and_libraries_2017.4.196/linux/mkl/lib/intel64'
 #Determine the conda directory
 #dir = "/".join(os.popen('which python').read().split('/')[0:-2])
 #mkl_include = '%s/include' % dir

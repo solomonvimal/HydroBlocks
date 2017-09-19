@@ -33,7 +33,7 @@ class HydroBlocks:
 
   #Initialize human water use module
   print "Initializing Human Water Management"
-  self.initialize_hwu()
+  self.initialize_hwu(info)
 
   #Other metrics
   self.dE = 0.0
@@ -278,18 +278,13 @@ class HydroBlocks:
  
   return
 
- def initialize_hwu(self,):
+ def initialize_hwu(self,info):
 
   from Human_Water_Use import Human_Water_Use as hwu
-  self.hwu = hwu(self.noahmp,self.nhru)
-  self.hwu.hwu_flag = self.hwu_flag
+  self.hwu = hwu(self,info)
   
-  dt = info['dt']
-  self.hwu.dta = dt # allocation time step
-  self.hwu.ntt = 1  #sub-time steps
-
   if self.hwu.hwu_flag == True:
-    self.hwu.Initialize_Allocation(self.noahmp,self.nhru,info)
+    self.hwu.initialize_allocation(self,)
 
   return
 
@@ -318,11 +313,7 @@ class HydroBlocks:
    #Save the original precip
    precip = np.copy(self.noahmp.prcp)
 
-   # Water from Human Use 
-   self.hwu.date = date
-   self.hwu.Calc_Human_Water_Demand_Supply(self.noahmp,TOPMODEL,self)
-
-    #Calculate initial NOAH water balance
+   #Calculate initial NOAH water balance
    self.initialize_water_balance()
 
    #Update model
@@ -377,7 +368,7 @@ class HydroBlocks:
 
   # Update water demands
   if self.hwu.hwu_flag == True:
-   water_use = info['input_fp'].groups['water_use']
+   water_use = self.input_fp.groups['water_use']
    if self.hwu.hwu_indust_flag == True:
     self.hwu.demand_indust[:]  = water_use.variables['industrial'][i,:] #m/s
     self.hwu.deficit_indust[:] = np.copy(self.hwu.demand_indust[:])
@@ -398,11 +389,10 @@ class HydroBlocks:
   self.noahmp.o2air[:] = 0.209*self.noahmp.psfc[:]# ! Partial pressure of O2 (Pa)  ! From NOAH-MP-WRF
 
   #apply irrigation
-  self.hwu.Human_Water_Irrigation(self.noahmp,self.dtopmodel,self)
+  self.hwu.Human_Water_Irrigation(self)
 
   #calculate water demands and supplies, and allocate volumes
-  self.hwu.date = date
-  self.hwu.Calc_Human_Water_Demand_Supply(self.noahmp,self.dtopmodel,self)
+  self.hwu.Calc_Human_Water_Demand_Supply(self)
  
   #Update NOAH
   self.noahmp.run_model(self.ncores)
@@ -411,7 +401,7 @@ class HydroBlocks:
   self.update_subsurface()
 
   # Abstract Surface Water and Groundwater
-  self.hwu.Water_Supply_Abstraction(self.noahmp,self.dtopmodel,self)
+  self.hwu.Water_Supply_Abstraction(self)
 
 
   return
@@ -635,15 +625,15 @@ class HydroBlocks:
   #Create the mapping
   if self.create_mask_flag == True:
    grp = fp_out.createGroup('latlon_mapping')
-   grp.createDimension('nlon',len(fp_in.groups['latlon_mapping'].dimensions['nlon']))
-   grp.createDimension('nlat',len(fp_in.groups['latlon_mapping'].dimensions['nlat']))
+   grp.createDimension('nlon',len(fp_in.groups['conus_albers_mapping'].dimensions['nx']))
+   grp.createDimension('nlat',len(fp_in.groups['conus_albers_mapping'].dimensions['ny']))
    hmll = grp.createVariable('hmll','f4',('nlat','nlon'))
-   hmll.gt = fp_in.groups['latlon_mapping'].variables['hmll'].gt
-   hmll.projection = fp_in.groups['latlon_mapping'].variables['hmll'].projection
+   hmll.gt = fp_in.groups['conus_albers_mapping'].variables['hmca'].gt
+   hmll.projection = fp_in.groups['conus_albers_mapping'].variables['hmca'].projection
    hmll.description = 'HSU mapping (regular lat/lon)'
-   hmll.nodata = fp_in.groups['latlon_mapping'].variables['hmll'].nodata
+   hmll.nodata = fp_in.groups['conus_albers_mapping'].variables['hmca'].nodata
    #Save the lat/lon mapping
-   hmll[:] = fp_in.groups['latlon_mapping'].variables['hmll'][:]
+   hmll[:] = fp_in.groups['conus_albers_mapping'].variables['hmca'][:]
 
   return
 
