@@ -17,6 +17,7 @@ class Human_Water_Use:
      
   ncells = NOAH.ncells
   self.itime = 0
+  self.dta = HB.dt
 
   self.hwu_flag = info['hwu_flag']
 
@@ -61,7 +62,7 @@ class Human_Water_Use:
    # Groundwater pumping where clay content < 50% OR hydraulic conductivity > 10^-6 
    self.mask_gw = np.array([ False if i<=10.0**-6 or j>=50. else True for i,j in zip(NOAH.satdk0,NOAH.clay_pct) ])
    # Maximum groundwater pumping distance (km)
-   self.gw_dist_lim  = 5.0 #km
+   self.gw_dist_lim  = 1.0 #km
    # Maximum slope allowed for upstream pumping
    self.gw_slope_lim = -1./1000. # m/m
 
@@ -136,21 +137,20 @@ class Human_Water_Use:
  def initialize_allocation(self,HB):
   NOAH = HB.noahmp
   TOPMODEL = HB.dtopmodel
-  
  
   if self.hwu_flag == True:
    ncells = NOAH.ncells
-   self.dta = HB.dt
-   self.ntt = int(HB.dt/HB.dtt)
+   self.dta = HB.dt #Update dta
+   self.ntt = 1#int(HB.dt/HB.dtt)
 
    # HRU distances
    # OPT 1) Centroid Distances
-   #self.ctrd_lats = info['input_fp'].groups['parameters'].variables['centroid_lats'][:]
-   #self.ctrd_lons = info['input_fp'].groups['parameters'].variables['centroid_lons'][:]
+   #self.ctrd_lats = HB.input_fp.groups['parameters'].variables['centroid_lats'][:]
+   #self.ctrd_lons = HB.input_fp.groups['parameters'].variables['centroid_lons'][:]
    #self.hrus_distances = cost_funcs.hrus_centroid_distance(self.ctrd_lats,self.ctrd_lons)  # km
    # OPT 2) Minimum Distance between a HRU centroid and it's neighboors boundary 
    self.hru_min_dist = HB.input_fp.groups['parameters'].variables['hru_min_dist'][:]
-   self.hrus_distances = self.hru_min_dist  # km
+   self.hrus_distances = np.copy(self.hru_min_dist)  # km
    print "HRU's distances - mean:%f and std:%f" % (np.mean(self.hrus_distances[self.hrus_distances>0.]), np.std(self.hrus_distances[self.hrus_distances>0.]))
    #plt.hist(self.hru_min_dist.flatten())
    #plt.show()
@@ -161,7 +161,6 @@ class Human_Water_Use:
 
    # Calculate slope between HRUs
    self.hrus_slopes = cost_funcs.hrus_slope(TOPMODEL.dem,self.hrus_distances)  # m/m
-
 
    # SURFACE WATER RATIO AND COST
    if self.hwu_sf_flag == True:
@@ -339,7 +338,6 @@ class Human_Water_Use:
         self.valid_links = gw_valid_links
 
 
-
     #Model Setup
     # Test for valid nodes and connections
     if any(self.valid_links):
@@ -395,10 +393,6 @@ class Human_Water_Use:
       #print self.ntwkm.graph.nodes[0][0].max_flow
       #print "Allocation Network Done!"
 
-
-
-
-
     return 
 
 
@@ -445,7 +439,7 @@ class Human_Water_Use:
     if self.hwu_indust_flag == True: self.deficit_indust = self.deficit_indust/self.dta/TOPMODEL.area
     if self.hwu_domest_flag == True: self.deficit_domest = self.deficit_domest/self.dta/TOPMODEL.area
     if self.hwu_lstock_flag == True: self.deficit_lstock = self.deficit_lstock/self.dta/TOPMODEL.area
-
+    # Convert from m3 to m/tstep
     if self.hwu_agric_flag  == True: self.alloc_agric  = self.alloc_agric/TOPMODEL.area/self.ntt
     if self.hwu_gw_flag == True : self.alloc_gw = self.alloc_gw/TOPMODEL.area/self.ntt
     if self.hwu_sf_flag == True : self.alloc_sf = self.alloc_sf/TOPMODEL.area/self.ntt
@@ -469,13 +463,13 @@ class Human_Water_Use:
     m = (self.supply_gw < 0)
     self.supply_gw[m] = 0.0
     # Future: Include corrections for environmental flows
-    self.supply_gw = self.supply_gw*0.8
+    #self.supply_gw = self.supply_gw*0.8
 
    # Surface Water Supply
    if self.hwu_sf_flag == True :
     self.supply_sf = NOAH.runsf*self.dta/1000. # from mm/s to m
     # Future Include correction for environmetal flows.
-    self.supply_sf = self.supply_sf*0.8
+    #self.supply_sf = self.supply_sf*0.8
 
   return
 
@@ -495,15 +489,18 @@ class Human_Water_Use:
    if self.hwu_gw_flag == True:
     m = (self.alloc_gw > 0.0)
     NOAH.dzwt[m] = (NOAH.dzwt-(self.alloc_gw))[m]  # m
+ 
+  return NOAH
 
  def Human_Water_Irrigation(self,HB):
   NOAH = HB.noahmp
   TOPMODEL = HB.dtopmodel
-  
+ 
+  self.irrigation[:] = 0.0 
   if self.hwu_flag == True:
    if self.hwu_agric_flag  == True:
     # Add as irrigation the amount of water that was allocated
-    self.irrigation[:] = self.alloc_agric*1000/NOAH.dt 
+    self.irrigation = self.alloc_agric*1000/NOAH.dt 
     #m = (self.irrigation > 0.0) & (self.mask_irrig == True)
     m = (self.mask_irrig == True)
     NOAH.prcp[m] = (NOAH.prcp + self.irrigation)[m]
@@ -656,15 +653,14 @@ class Human_Water_Use:
  def Agriculture_Demand(self,HB):
   NOAH = HB.noahmp
   TOPMODEL = HB.dtopmodel
-  HWU = HB.hwu
-  
+    
   demand_agric = self.Calculate_Irrigation_Deficit(NOAH) # m
  
   # Limit Demand for the Crop Calendar
   mnt = HB.idate.month-1
-  m = HWU.gscal[:,mnt] == 0
+  m = self.gscal[:,mnt] == 0
   demand_agric[m] = 0.0  
-
+ 
   return demand_agric
 
 
@@ -681,7 +677,7 @@ class Human_Water_Use:
   wltsmc0 = NOAH.wltsmc0 # Wilting point
   smcmax = NOAH.smcmax # Saturated 
   
-  self.demand_agric[:] = 0.0
+  demand_agric = np.zeros(ncells)
 
   # Irrigation Demand for general crop areas
   m = self.mask_agric
@@ -689,7 +685,7 @@ class Human_Water_Use:
    dsm = smcref[:,np.newaxis] - smc
    dsm [dsm < 0] = 0.0
    soil_demand = np.array([ np.sum(dsm[i,:nroot_zone_depht[i]]*sldpth[i,:nroot_zone_depht[i]]) for i in range(ncells) ])
-   self.demand_agric[m] = soil_demand[m]
+   demand_agric[m] = soil_demand[m]
   
   # Irrigation Demand for paddy  crop areas
   m = ( self.irrig_land == 2.0 ) & (self.mask_agric == True)
@@ -697,17 +693,15 @@ class Human_Water_Use:
    dsm = smcmax[:,np.newaxis] - smc
    dsm[dsm < 0] = 0.0
    soil_demand = np.array([ np.sum(dsm[i,:nroot_zone_depht[i]]*sldpth[i,:nroot_zone_depht[i]]) for i in range(ncells) ])
-   self.demand_agric[m] = soil_demand[m]  
+   demand_agric[m] = soil_demand[m]  
   
-
   # Check if irrigation is triggered or not - Ozdodan et. al (2010)
   #MAi = (smc - wltsmc0[:,np.newaxis])/(sldpth-wltsmc0[:,np.newaxis])
   #MA = np.array([ np.sum(MAi[i,:nroot_zone_depht[i]]*sldpth[i,:nroot_zone_depht[i]])/np.sum(sldpth[i,:nroot_zone_depht[i]]) for i in range(ncells) ])
   #self.mask_trigger = (MA > 0.5*smcref) & (self.mask_irrig == True)
   
-   
 
-  return self.demand_agric
+  return demand_agric
 
 
     

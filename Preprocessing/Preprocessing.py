@@ -100,8 +100,7 @@ def Prepare_Model_Input_Data(hydrobloks_info):
   'tree30':'%s/tree30_ea.tif' % workspace,
   'irrig_land':'%s/irrig_land_ea.tif' % workspace
   }
- if hydrobloks_info['hwu_flag']:
-  if hydrobloks_info['hwu_agric_flag']:
+ if hydrobloks_info['hwu_agric_flag']:
    wbd['files']['irrig_land'] = '%s/irrig_land_ea.tif' % workspace
    wbd['files']['start_growing_season'] = '%s/start_growing_season_ea.tif' % workspace
    wbd['files']['end_growing_season']   = '%s/end_growing_season_ea.tif' % workspace
@@ -570,20 +569,23 @@ def Assign_Parameters_Semidistributed(covariates,metadata,hydrobloks_info,OUTPUT
   else: OUTPUT['hsu']['mannings'][hsu] = 0.15 #manning's n for overland flow (0.01-0.8)
 
   # Water Management Variables
-  # Irrigation: 1 Irrigated, 2 paddy crop, 0 others
-  OUTPUT['hsu']['irrig_land'][hsu] = int(stats.mode(covariates['irrig_land'][idx])[0][0]) 
-  # Crop Calendar
-  OUTPUT['hsu']['start_growing_season'][hsu] = int(stats.mode(covariates['start_growing_season'][idx])[0][0])
-  OUTPUT['hsu']['end_growing_season'][hsu] = int(stats.mode(covariates['end_growing_season'][idx])[0][0])
-  #HRU Centroids for water management
-  #clon, clat = Get_HRUs_Centroid(hsu, cluster_ids, covariates['lats'], covariates['lons']) 
-  OUTPUT['hsu']['centroid_lons'][hsu] = np.nanmean(covariates['lons'][idx])
-  OUTPUT['hsu']['centroid_lats'][hsu] = np.nanmean(covariates['lats'][idx])
+  if hydrobloks_info['hwu_agric_flag'] == True:
+   # Irrigation: 1 Irrigated, 2 paddy crop, 0 others
+   OUTPUT['hsu']['irrig_land'][hsu] = int(stats.mode(covariates['irrig_land'][idx])[0][0]) 
+   # Crop Calendar
+   OUTPUT['hsu']['start_growing_season'][hsu] = int(stats.mode(covariates['start_growing_season'][idx])[0][0])
+   OUTPUT['hsu']['end_growing_season'][hsu] = int(stats.mode(covariates['end_growing_season'][idx])[0][0])
+
+  if hydrobloks_info['hwu_flag'] == True:
+   #HRU Centroids for water management
+   #clon, clat = Get_HRUs_Centroid(hsu, cluster_ids, covariates['lats'], covariates['lons']) 
+   OUTPUT['hsu']['centroid_lons'][hsu] = np.nanmean(covariates['lons'][idx])
+   OUTPUT['hsu']['centroid_lats'][hsu] = np.nanmean(covariates['lats'][idx])
   
- for hsu in np.arange(nclusters):
-  #HRU distance between the centroids of the hru and all the other hrus 
-  OUTPUT['hsu']['hru_min_dist'][hsu,:] = Calculate_Min_Distance(hsu, nclusters, cluster_ids, covariates['lats'], covariates['lons'], OUTPUT['hsu']['centroid_lats'], OUTPUT['hsu']['centroid_lons'])
-  
+   for hsu in np.arange(nclusters):
+     #HRU distance between the centroids of the hru and all the other hrus 
+     OUTPUT['hsu']['hru_min_dist'][hsu,:] = Calculate_Min_Distance(hsu, nclusters, cluster_ids, covariates['lats'], covariates['lons'], OUTPUT['hsu']['centroid_lats'], OUTPUT['hsu']['centroid_lons'])
+
  return OUTPUT
 
 

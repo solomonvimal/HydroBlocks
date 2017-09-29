@@ -117,8 +117,9 @@ class HydroBlocks:
 
   #Set info
   self.noahmp.iz0tlnd = 0
-  self.noahmp.z_ml[:] = 10.0#2.0 -- Noemi
-  tmp = np.array([0.1,0.3,0.6,1.0,2.0,2.0,2.0,2.0]) #Let's bring this out to the metadata
+  #tmp = np.array([0.1,0.3,0.6,1.0,2.0,2.0,2.0,2.0]) #Let's bring this out to the metadata
+  tmp = np.array([0.1,0.1,0.1,0.2,0.2,0.2,0.3,0.5,0.5,0.5,0.5,1.0,2.0,2.0,2.0]) 
+  self.noahmp.z_ml[:] = np.sum(tmp) #2.0 -- Noemi
   self.noahmp.sldpth[:] = tmp
   self.noahmp.zsoil[:] = -np.cumsum(self.noahmp.sldpth[:],axis=1)
   self.noahmp.zsnso[:] = 0.0
@@ -271,7 +272,7 @@ class HydroBlocks:
   self.dtopmodel.flow_matrix_T.setdiag(self.dtopmodel.flow_matrix_T.diagonal()) #Ensure the zeros are not sparse  (for kinematic wave solution).
 
   #Initialize the solver
-  if self.mkl_flag:self.dtopmodel.dtt.initialize(self.dtopmodel.flow_matrix_T.indices,self.dtopmodel.flow_matrix_T.indptr)
+  if self.mkl_flag: self.dtopmodel.dtt.initialize(self.dtopmodel.flow_matrix_T.indices,self.dtopmodel.flow_matrix_T.indptr)
 
   #Initialize the soil moisture deficit values
   self.dtopmodel.si[:] = 0.0
@@ -298,6 +299,7 @@ class HydroBlocks:
   i = 0
   tic = time.time()
   self.noahmp.dzwt[:] = 0.0
+  if self.subsurface_module == 'dtopmodel': self.dtopmodel.ex[:] = 0.0
   while date <= self.fdate:
 
    #Memorize time stamp
@@ -392,13 +394,16 @@ class HydroBlocks:
   self.hwu.Human_Water_Irrigation(self)
 
   #calculate water demands and supplies, and allocate volumes
-  self.hwu.Calc_Human_Water_Demand_Supply(self)
+  #self.hwu.Calc_Human_Water_Demand_Supply(self)
  
   #Update NOAH
   self.noahmp.run_model(self.ncores)
 
   #Update subsurface
   self.update_subsurface()
+
+  #calculate water demands and supplies, and allocate volumes
+  self.hwu.Calc_Human_Water_Demand_Supply(self)
 
   # Abstract Surface Water and Groundwater
   self.hwu.Water_Supply_Abstraction(self)
@@ -506,6 +511,7 @@ class HydroBlocks:
   grp.variables['qbase'][itime,:] = NOAH.dt*np.copy(NOAH.runsb) #mm
   grp.variables['qsurface'][itime,:] = NOAH.dt*np.copy(NOAH.runsf) #mm
   grp.variables['prcp'][itime,:] = NOAH.dt*np.copy(NOAH.prcp) #mm
+  grp.variables['trad'][itime,:] = np.copy(NOAH.trad) #K
  
   #TOPMODEL
   if self.subsurface_module == 'dtopmodel':
@@ -519,23 +525,24 @@ class HydroBlocks:
   grp.variables['errwat'][itime,:] = np.copy(HB.errwat)
 
   #Human Water Management
-  grp.variables['wtd'][itime,:] = np.copy(NOAH.zwt)
-  grp.variables['totsmc'][itime,:] = smw = np.sum(NOAH.sldpth*NOAH.smc,axis=1)/np.sum(NOAH.sldpth[0])
+  grp.variables['wtd'][itime,:] = np.copy(NOAH.zwt)  # m
+  grp.variables['totsmc'][itime,:] = smw = np.sum(NOAH.sldpth*NOAH.smc,axis=1)/np.sum(NOAH.sldpth[0]) #m3/m3
 
   if HWU.hwu_agric_flag == True:
-   grp.variables['demand_agric'][itime,:] = np.copy(HWU.demand_agric)*NOAH.dt
-   grp.variables['deficit_agric'][itime,:] = np.copy(HWU.deficit_agric)*NOAH.dt
+   grp.variables['demand_agric'][itime,:] = np.copy(HWU.demand_agric)*NOAH.dt #m
+   grp.variables['deficit_agric'][itime,:] = np.copy(HWU.deficit_agric)*NOAH.dt #m
+   grp.variables['irrig_agric'][itime,:] = np.copy(HWU.irrigation)*1000.0*NOAH.dt   #mm
 
   if HWU.hwu_flag == True:
    if HWU.hwu_indust_flag == True:
-     grp.variables['demand_indust'][itime,:] = np.copy(HWU.demand_indust)*NOAH.dt
-     grp.variables['deficit_indust'][itime,:] = np.copy(HWU.deficit_indust)*NOAH.dt
+     grp.variables['demand_indust'][itime,:] = np.copy(HWU.demand_indust)*NOAH.dt #m
+     grp.variables['deficit_indust'][itime,:] = np.copy(HWU.deficit_indust)*NOAH.dt #m
    if HWU.hwu_domest_flag == True:
-     grp.variables['demand_domest'][itime,:] = np.copy(HWU.demand_domest)*NOAH.dt
-     grp.variables['deficit_domest'][itime,:] = np.copy(HWU.deficit_domest)*NOAH.dt
+     grp.variables['demand_domest'][itime,:] = np.copy(HWU.demand_domest)*NOAH.dt #m
+     grp.variables['deficit_domest'][itime,:] = np.copy(HWU.deficit_domest)*NOAH.dt #m
    if HWU.hwu_lstock_flag == True:
-     grp.variables['demand_lstock'][itime,:] = np.copy(HWU.demand_lstock)*NOAH.dt
-     grp.variables['deficit_lstock'][itime,:] = np.copy(HWU.deficit_lstock)*NOAH.dt
+     grp.variables['demand_lstock'][itime,:] = np.copy(HWU.demand_lstock)*NOAH.dt #m
+     grp.variables['deficit_lstock'][itime,:] = np.copy(HWU.deficit_lstock)*NOAH.dt #m
 
 
   return
@@ -551,8 +558,9 @@ class HydroBlocks:
              'g':{'description':'Ground heat flux','units':'W/m2'},
              'sh':{'description':'Sensible heat flux','units':'W/m2'},
              'lh':{'description':'Latent heat flux','units':'W/m2'},
-             #'lwnet':{'description':'Net longwave radiation','units':'W/m2'},
-             #'swnet':{'description':'Absorbed shortwave radiation','units':'W/m2'},
+             'lwnet':{'description':'Net longwave radiation','units':'W/m2'},
+             'swnet':{'description':'Absorbed shortwave radiation','units':'W/m2'},
+             'trad':{'description':'Land surface skin temperature','units':'K'},
              #'et':{'description':'Evapotranspiration','units':'mm/s'},
              'qbase':{'description':'Excess runoff','units':'mm/s'},
              'qsurface':{'description':'Surface runoff','units':'mm/s'},
@@ -570,14 +578,15 @@ class HydroBlocks:
              'wtd':{'description':'WTD','units':'m'},
              'errwat':{'description':'errwat','units':'mm'},
              'totsmc':{'description':'totsmc','units':'m3/m3'},
-             'demand_agric':{'description':'Irrigation demand','units':'mm'},
-             'deficit_agric':{'description':'Irrigation deficit','units':'mm'},
-             'demand_indust':{'description':'Industrial demand','units':'mm'},
-             'deficit_indust':{'description':'Industrial deficit','units':'mm'},
-             'demand_domest':{'description':'Domestic demand','units':'mm'},
-             'deficit_domest':{'description':'Domestic deficit','units':'mm'},
-             'demand_lstock':{'description':'Livestock demand','units':'mm'},
-             'deficit_lstock':{'description':'Livestock deficit','units':'mm'},
+             'demand_agric':{'description':'Irrigation demand','units':'m'},
+             'deficit_agric':{'description':'Irrigation deficit','units':'m'},
+             'demand_indust':{'description':'Industrial demand','units':'m'},
+             'deficit_indust':{'description':'Industrial deficit','units':'m'},
+             'demand_domest':{'description':'Domestic demand','units':'m'},
+             'deficit_domest':{'description':'Domestic deficit','units':'m'},
+             'demand_lstock':{'description':'Livestock demand','units':'m'},
+             'deficit_lstock':{'description':'Livestock deficit','units':'m'},
+             'irrig_agric':{'description':'Irrigated volume','units':'mm'},
              }
 
   #Create the dimensions
