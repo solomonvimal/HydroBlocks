@@ -785,17 +785,15 @@ def Create_and_Curate_Covariates(wbd):
  for var in covariates:
   mask1 = (np.isinf(covariates[var]) == 0) & (np.isnan(covariates[var]) == 0) 
   mask0 = (np.isinf(covariates[var]) == 1) | (np.isnan(covariates[var]) == 1)
-
-  if var in ['fdir','nlcd','TEXTURE_CLASS','lc']:
-   if len(covariates[var][mask1]) < 1: print "Full of Nan's Error: 1", var, covariates[var], wbd['files'][var] # Noemi 
-   covariates[var][mask0] = -9999.0 #stats.mode(covariates[var][mask1])[0][0]
-  else:
-   covariates[var][mask0] = -9999.0 #np.mean(covariates[var][mask1])
+  covariates[var][mask0] = -9999.0# stats.mode(covariates[var][mask1])[0][0]
 
  #Set everything that is -9999 to the mean
  for var in covariates:
-  if len(covariates[var][covariates[var] != -9999.0]) < 1: print "Error: Covariate %s is full of Nan's" % (var), covariates[var], wbd['files'][var] # Noemi insert
-  if var in ['fdir','nlcd','TEXTURE_CLASS','lc']: 
+  if len(covariates[var][covariates[var] != -9999.0]) < 1: 
+   print "Error: Covariate %s is full of Nan's" % (var), covariates[var], wbd['files'][var] # Noemi insert
+   covariates[var][:] = 0.5
+   print "Error: Covariate was set to 0.5"
+  if var in ['fdir','nlcd','TEXTURE_CLASS','lc','irrig_land','bare30','water30','three30']: 
    covariates[var][covariates[var] == -9999.0] = stats.mode(covariates[var][covariates[var] != -9999.0])[0][0]  
   else:
    covariates[var][covariates[var] == -9999.0] = np.mean(covariates[var][covariates[var] != -9999.0])
