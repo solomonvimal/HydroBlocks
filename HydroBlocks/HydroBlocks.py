@@ -10,6 +10,11 @@ sys.path.append('Model/pyDTopmodel')
 import scipy.sparse as sparse
 import pickle
 
+import warnings
+from scipy.sparse import SparseEfficiencyWarning
+warnings.simplefilter('ignore',SparseEfficiencyWarning)
+
+
 def initialize(info):
 
  HB = HydroBlocks(info)
@@ -319,7 +324,7 @@ class HydroBlocks:
    self.initialize_water_balance()
 
    #Update model
-   self.update()
+   self.update(date)
 
    #Return precip to original value
    self.noahmp.prcp[:] = precip[:] 
@@ -384,7 +389,7 @@ class HydroBlocks:
 
   return
 
- def update(self,):
+ def update(self,date):
 
   #Set the partial pressure of CO2 and O2
   self.noahmp.co2air[:] = 355.E-6*self.noahmp.psfc[:]# ! Partial pressure of CO2 (Pa) ! From NOAH-MP-WRF
@@ -393,9 +398,6 @@ class HydroBlocks:
   #apply irrigation
   self.hwu.Human_Water_Irrigation(self)
 
-  #calculate water demands and supplies, and allocate volumes
-  #self.hwu.Calc_Human_Water_Demand_Supply(self)
- 
   #Update NOAH
   self.noahmp.run_model(self.ncores)
 
@@ -403,7 +405,7 @@ class HydroBlocks:
   self.update_subsurface()
 
   #calculate water demands and supplies, and allocate volumes
-  self.hwu.Calc_Human_Water_Demand_Supply(self)
+  self.hwu.Calc_Human_Water_Demand_Supply(self,date)
 
   # Abstract Surface Water and Groundwater
   self.hwu.Water_Supply_Abstraction(self)
@@ -531,7 +533,7 @@ class HydroBlocks:
   if HWU.hwu_agric_flag == True:
    grp.variables['demand_agric'][itime,:] = np.copy(HWU.demand_agric)*NOAH.dt #m
    grp.variables['deficit_agric'][itime,:] = np.copy(HWU.deficit_agric)*NOAH.dt #m
-   grp.variables['irrig_agric'][itime,:] = np.copy(HWU.irrigation)*1000.0*NOAH.dt   #mm
+   grp.variables['irrig_agric'][itime,:] = np.copy(HWU.irrigation)*NOAH.dt   #m
 
   if HWU.hwu_flag == True:
    if HWU.hwu_indust_flag == True:
@@ -586,7 +588,7 @@ class HydroBlocks:
              'deficit_domest':{'description':'Domestic deficit','units':'m'},
              'demand_lstock':{'description':'Livestock demand','units':'m'},
              'deficit_lstock':{'description':'Livestock deficit','units':'m'},
-             'irrig_agric':{'description':'Irrigated volume','units':'mm'},
+             'irrig_agric':{'description':'Irrigated volume','units':'m'},
              }
 
   #Create the dimensions

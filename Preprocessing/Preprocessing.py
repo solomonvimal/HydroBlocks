@@ -17,7 +17,8 @@ from geospatialtools import gdal_tools
 from geospatialtools import terrain_tools
 import random
 from skimage.segmentation import find_boundaries, clear_border
-#from osgeo import ogr, osr, gdal
+import matplotlib.pyplot as plt
+import gc
 
 
 
@@ -340,6 +341,14 @@ def Compute_HRUs_Semidistributed_Kmeans(covariates,mask,nclusters,hydrobloks_inf
  
  #Find the mask for and without channels
  mask_nc = mask
+
+ #Mask regions without soil properties or land cover
+ tmp_clay = gdal_tools.read_raster(wbd['files']['clay'])
+ tmp_lc = gdal_tools.read_raster(wbd['files']['lc'])
+ nodata = (tmp_clay == -9999) & (tmp_lc == 17)
+ mask_nc[nodata]=False
+ del tmp_clay,tmp_lc
+ gc.collect()
 
  #Define the covariates
  info_general = {'area':{'data':np.log(covariates['carea'][mask_nc == True]),},
@@ -988,6 +997,9 @@ def Prepare_Meteorology_Semidistributed(workspace,wbd,OUTPUT,input_dir,info,hydr
   mask_dates = (dates >= idate) & (dates <= fdate)
   data = np.ma.getdata(fp.variables[var][mask_dates,:,:])
   fp.close()
+  del fp
+  gc.collect()
+
   #Assing to hsus
   for hsu in mapping_info[var]:
    #print data_var,data, data.shape, hsu,mapping_info[var][hsu]['pcts'],mapping_info[var][hsu]['coords'],
